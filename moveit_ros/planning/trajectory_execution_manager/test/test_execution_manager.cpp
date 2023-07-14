@@ -57,7 +57,7 @@ public:
   {
     nh_ = ros::NodeHandle();
     moveit_cpp_ptr = std::make_shared<MoveItCpp>(nh_);
-    trajectory_execution_manager_ptr = moveit_cpp_ptr->getTrajectoryExecutionManagerNonConst();
+    trajectory_execution_manager_ptr = moveit_cpp_ptr->getTrajectoryExecutionManager();
 
     traj1.joint_trajectory.joint_names.push_back("panda_joint1");
     traj1.joint_trajectory.points.resize(1);

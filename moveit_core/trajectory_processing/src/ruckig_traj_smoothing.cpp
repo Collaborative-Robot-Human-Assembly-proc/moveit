@@ -38,7 +38,6 @@
 #include <Eigen/Geometry>
 #include <limits>
 #include <moveit/trajectory_processing/ruckig_traj_smoothing.h>
-#include <ros/ros.h>
 #include <vector>
 
 namespace trajectory_processing
@@ -51,13 +50,11 @@ constexpr double DEFAULT_MAX_ACCELERATION = 10;  // rad/s^2
 constexpr double DEFAULT_MAX_JERK = 100;         // rad/s^3
 constexpr double MAX_DURATION_EXTENSION_FACTOR = 50.0;
 constexpr double DURATION_EXTENSION_FRACTION = 1.1;
-constexpr double OVERSHOOT_CHECK_PERIOD = 0.01;  // sec
 }  // namespace
 
 bool RuckigSmoothing::applySmoothing(robot_trajectory::RobotTrajectory& trajectory,
                                      const double max_velocity_scaling_factor,
-                                     const double max_acceleration_scaling_factor, const bool mitigate_overshoot,
-                                     const double overshoot_threshold)
+                                     const double max_acceleration_scaling_factor)
 {
   if (!validateGroup(trajectory))
   {
@@ -82,14 +79,13 @@ bool RuckigSmoothing::applySmoothing(robot_trajectory::RobotTrajectory& trajecto
     return false;
   }
 
-  return runRuckig(trajectory, ruckig_input, mitigate_overshoot, overshoot_threshold);
+  return runRuckig(trajectory, ruckig_input);
 }
 
 bool RuckigSmoothing::applySmoothing(robot_trajectory::RobotTrajectory& trajectory,
                                      const std::unordered_map<std::string, double>& velocity_limits,
                                      const std::unordered_map<std::string, double>& acceleration_limits,
-                                     const std::unordered_map<std::string, double>& jerk_limits,
-                                     const bool mitigate_overshoot, const double overshoot_threshold)
+                                     const std::unordered_map<std::string, double>& jerk_limits)
 {
   if (!validateGroup(trajectory))
   {
@@ -141,7 +137,7 @@ bool RuckigSmoothing::applySmoothing(robot_trajectory::RobotTrajectory& trajecto
     }
   }
 
-  return runRuckig(trajectory, ruckig_input, mitigate_overshoot, overshoot_threshold);
+  return runRuckig(trajectory, ruckig_input);
 }
 
 std::optional<robot_trajectory::RobotTrajectory>
@@ -254,28 +250,18 @@ bool RuckigSmoothing::getRobotModelBounds(const double max_velocity_scaling_fact
                        << " rad/s^2. You can define acceleration limits in the URDF or joint_limits.yaml.");
       ruckig_input.max_acceleration.at(i) = max_acceleration_scaling_factor * DEFAULT_MAX_ACCELERATION;
     }
-    // Read jerk limits from parameters since bounds.jerk_bounded_ was never implemented for MoveIt1
-    double jerk_limit = DEFAULT_MAX_JERK;
-    std::string jerk_param = "ruckig/" + vars.at(i) + "/jerk_limit";
-    if (ros::param::get(jerk_param, jerk_limit))
-    {
-      ruckig_input.max_jerk.at(i) = jerk_limit;
-    }
-    else
-    {
-      ruckig_input.max_jerk.at(i) = DEFAULT_MAX_JERK;
-      ROS_WARN_STREAM_NAMED(LOGNAME, "Joint jerk limit for joint " + vars.at(i) + " was not defined. Using the default "
-                                         << DEFAULT_MAX_JERK
-                                         << " rad/s^3. You can define a jerk limit with parameter " + jerk_param);
-    }
+    // TODO(andyz): Add bounds.jerk_bounded_ for MoveIt1
+    ruckig_input.max_jerk.at(i) = DEFAULT_MAX_JERK;
+    ROS_WARN_STREAM_ONCE_NAMED(LOGNAME, "Joint jerk limits are not defined. Using the default "
+                                            << DEFAULT_MAX_JERK
+                                            << " rad/s^3. You can define jerk limits in joint_limits.yaml.");
   }
 
   return true;
 }
 
 bool RuckigSmoothing::runRuckig(robot_trajectory::RobotTrajectory& trajectory,
-                                ruckig::InputParameter<ruckig::DynamicDOFs>& ruckig_input,
-                                const bool mitigate_overshoot, const double overshoot_threshold)
+                                ruckig::InputParameter<ruckig::DynamicDOFs>& ruckig_input)
 {
   const size_t num_waypoints = trajectory.getWayPointCount();
   moveit::core::JointModelGroup const* const group = trajectory.getGroup();
@@ -287,7 +273,7 @@ bool RuckigSmoothing::runRuckig(robot_trajectory::RobotTrajectory& trajectory,
 
   // Initialize the smoother
   ruckig::Ruckig<ruckig::DynamicDOFs> ruckig(num_dof, trajectory.getAverageSegmentDuration());
-  initializeRuckigState(*trajectory.getFirstWayPointPtr(), group, ruckig_input);
+  initializeRuckigState(*trajectory.getFirstWayPointPtr(), group, ruckig_input, ruckig_output);
 
   // Cache the trajectory in case we need to reset it
   robot_trajectory::RobotTrajectory original_trajectory =
@@ -296,55 +282,53 @@ bool RuckigSmoothing::runRuckig(robot_trajectory::RobotTrajectory& trajectory,
   ruckig::Result ruckig_result;
   double duration_extension_factor = 1;
   bool smoothing_complete = false;
-  size_t waypoint_idx = 0;
   while ((duration_extension_factor <= MAX_DURATION_EXTENSION_FACTOR) && !smoothing_complete)
   {
-    while (waypoint_idx < num_waypoints - 1)
+    for (size_t waypoint_idx = 0; waypoint_idx < num_waypoints - 1; ++waypoint_idx)
     {
-      moveit::core::RobotStatePtr curr_waypoint = trajectory.getWayPointPtr(waypoint_idx);
       moveit::core::RobotStatePtr next_waypoint = trajectory.getWayPointPtr(waypoint_idx + 1);
 
-      getNextRuckigInput(curr_waypoint, next_waypoint, group, ruckig_input);
+      getNextRuckigInput(trajectory.getWayPointPtr(waypoint_idx), next_waypoint, group, ruckig_input);
 
       // Run Ruckig
-      ruckig::Trajectory<ruckig::DynamicDOFs, ruckig::StandardVector> ruckig_trajectory(num_dof);
-      ruckig_result = ruckig.calculate(ruckig_input, ruckig_trajectory);
-
-      // Step through the trajectory at the given OVERSHOOT_CHECK_PERIOD and check for overshoot.
-      // We will extend the duration to mitigate it.
-      bool overshoots = false;
-      if (mitigate_overshoot)
-      {
-        overshoots = checkOvershoot(ruckig_trajectory, num_dof, ruckig_input, overshoot_threshold);
-      }
+      ruckig_result = ruckig.update(ruckig_input, ruckig_output);
 
       // The difference between Result::Working and Result::Finished is that Finished can be reached in one
       // Ruckig timestep (constructor parameter). Both are acceptable for trajectories.
       // (The difference is only relevant for streaming mode.)
 
       // If successful and at the last trajectory segment
-      if (!overshoots && (waypoint_idx == num_waypoints - 2) &&
+      if ((waypoint_idx == num_waypoints - 2) &&
           (ruckig_result == ruckig::Result::Working || ruckig_result == ruckig::Result::Finished))
       {
-        trajectory.setWayPointDurationFromPrevious(waypoint_idx + 1, ruckig_trajectory.get_duration());
+        trajectory.setWayPointDurationFromPrevious(waypoint_idx + 1, ruckig_output.trajectory.get_duration());
         smoothing_complete = true;
         break;
       }
 
+      // TODO(andyz): why doesn't this work?
+      // // If successful, on to the next waypoint
+      // if (ruckig_result == ruckig::Result::Working || ruckig_result == ruckig::Result::Finished)
+      // {
+      //   trajectory.setWayPointDurationFromPrevious(waypoint_idx + 1, ruckig_output.trajectory.get_duration());
+      //   continue;
+      // }
+
       // Extend the trajectory duration if Ruckig could not reach the waypoint successfully
-      if (overshoots || (ruckig_result != ruckig::Result::Working && ruckig_result != ruckig::Result::Finished))
+      if (ruckig_result != ruckig::Result::Working && ruckig_result != ruckig::Result::Finished)
       {
         duration_extension_factor *= DURATION_EXTENSION_FRACTION;
+        // Reset the trajectory
+        trajectory = robot_trajectory::RobotTrajectory(original_trajectory, true /* deep copy */);
 
         const std::vector<int>& move_group_idx = group->getVariableIndexList();
-        extendTrajectoryDuration(duration_extension_factor, waypoint_idx, num_dof, move_group_idx, original_trajectory,
-                                 trajectory);
+        extendTrajectoryDuration(duration_extension_factor, num_waypoints, num_dof, move_group_idx, trajectory,
+                                 original_trajectory);
 
-        initializeRuckigState(*trajectory.getFirstWayPointPtr(), group, ruckig_input);
-        // Continue the loop from failed segment, but with increased duration extension factor
+        initializeRuckigState(*trajectory.getFirstWayPointPtr(), group, ruckig_input, ruckig_output);
+        // Begin the for() loop again
         break;
       }
-      ++waypoint_idx;
     }
   }
 
@@ -363,35 +347,38 @@ bool RuckigSmoothing::runRuckig(robot_trajectory::RobotTrajectory& trajectory,
   return true;
 }
 
-void RuckigSmoothing::extendTrajectoryDuration(const double duration_extension_factor, size_t waypoint_idx,
+void RuckigSmoothing::extendTrajectoryDuration(const double duration_extension_factor, size_t num_waypoints,
                                                const size_t num_dof, const std::vector<int>& move_group_idx,
                                                const robot_trajectory::RobotTrajectory& original_trajectory,
                                                robot_trajectory::RobotTrajectory& trajectory)
 {
-  trajectory.setWayPointDurationFromPrevious(waypoint_idx + 1,
-                                             duration_extension_factor *
-                                                 original_trajectory.getWayPointDurationFromPrevious(waypoint_idx + 1));
-  // re-calculate waypoint velocity and acceleration
-  auto target_state = trajectory.getWayPointPtr(waypoint_idx + 1);
-  const auto prev_state = trajectory.getWayPointPtr(waypoint_idx);
-
-  double timestep = trajectory.getWayPointDurationFromPrevious(waypoint_idx + 1);
-
-  for (size_t joint = 0; joint < num_dof; ++joint)
+  for (size_t time_stretch_idx = 1; time_stretch_idx < num_waypoints; ++time_stretch_idx)
   {
-    target_state->setVariableVelocity(move_group_idx.at(joint),
-                                      (1 / duration_extension_factor) *
-                                          target_state->getVariableVelocity(move_group_idx.at(joint)));
+    trajectory.setWayPointDurationFromPrevious(
+        time_stretch_idx,
+        duration_extension_factor * original_trajectory.getWayPointDurationFromPrevious(time_stretch_idx));
+    // re-calculate waypoint velocity and acceleration
+    auto target_state = trajectory.getWayPointPtr(time_stretch_idx);
+    const auto prev_state = trajectory.getWayPointPtr(time_stretch_idx - 1);
+    double timestep = trajectory.getAverageSegmentDuration();
+    for (size_t joint = 0; joint < num_dof; ++joint)
+    {
+      target_state->setVariableVelocity(move_group_idx.at(joint),
+                                        (1 / duration_extension_factor) *
+                                            target_state->getVariableVelocity(move_group_idx.at(joint)));
 
-    double prev_velocity = prev_state->getVariableVelocity(move_group_idx.at(joint));
-    double curr_velocity = target_state->getVariableVelocity(move_group_idx.at(joint));
-    target_state->setVariableAcceleration(move_group_idx.at(joint), (curr_velocity - prev_velocity) / timestep);
+      double prev_velocity = prev_state->getVariableVelocity(move_group_idx.at(joint));
+      double curr_velocity = target_state->getVariableVelocity(move_group_idx.at(joint));
+      target_state->setVariableAcceleration(move_group_idx.at(joint), (curr_velocity - prev_velocity) / timestep);
+    }
+    target_state->update();
   }
 }
 
 void RuckigSmoothing::initializeRuckigState(const moveit::core::RobotState& first_waypoint,
                                             const moveit::core::JointModelGroup* joint_group,
-                                            ruckig::InputParameter<ruckig::DynamicDOFs>& ruckig_input)
+                                            ruckig::InputParameter<ruckig::DynamicDOFs>& ruckig_input,
+                                            ruckig::OutputParameter<ruckig::DynamicDOFs>& ruckig_output)
 {
   const size_t num_dof = joint_group->getVariableCount();
   const std::vector<int>& idx = joint_group->getVariableIndexList();
@@ -414,6 +401,10 @@ void RuckigSmoothing::initializeRuckigState(const moveit::core::RobotState& firs
   std::copy_n(current_positions_vector.begin(), num_dof, ruckig_input.current_position.begin());
   std::copy_n(current_velocities_vector.begin(), num_dof, ruckig_input.current_velocity.begin());
   std::copy_n(current_accelerations_vector.begin(), num_dof, ruckig_input.current_acceleration.begin());
+  // Initialize output data struct
+  ruckig_output.new_position = ruckig_input.current_position;
+  ruckig_output.new_velocity = ruckig_input.current_velocity;
+  ruckig_output.new_acceleration = ruckig_input.current_acceleration;
 }
 
 void RuckigSmoothing::getNextRuckigInput(const moveit::core::RobotStateConstPtr& current_waypoint,
@@ -449,32 +440,5 @@ void RuckigSmoothing::getNextRuckigInput(const moveit::core::RobotStateConstPtr&
         std::clamp(ruckig_input.target_acceleration.at(joint), -ruckig_input.max_acceleration.at(joint),
                    ruckig_input.max_acceleration.at(joint));
   }
-}
-
-bool RuckigSmoothing::checkOvershoot(ruckig::Trajectory<ruckig::DynamicDOFs, ruckig::StandardVector>& ruckig_trajectory,
-                                     const size_t num_dof, ruckig::InputParameter<ruckig::DynamicDOFs>& ruckig_input,
-                                     const double overshoot_threshold)
-{
-  // For every timestep
-  for (double time_from_start = OVERSHOOT_CHECK_PERIOD; time_from_start < ruckig_trajectory.get_duration();
-       time_from_start += OVERSHOOT_CHECK_PERIOD)
-  {
-    std::vector<double> new_position(num_dof);
-    std::vector<double> new_velocity(num_dof);
-    std::vector<double> new_acceleration(num_dof);
-    ruckig_trajectory.at_time(time_from_start, new_position, new_velocity, new_acceleration);
-    // For every joint
-    for (size_t joint = 0; joint < num_dof; ++joint)
-    {
-      // If the sign of the error changed and the threshold difference was exceeded
-      double error = new_position[joint] - ruckig_input.target_position.at(joint);
-      if (((error / (ruckig_input.current_position.at(joint) - ruckig_input.target_position.at(joint))) < 0) &&
-          std::fabs(error) > overshoot_threshold)
-      {
-        return true;
-      }
-    }
-  }
-  return false;
 }
 }  // namespace trajectory_processing

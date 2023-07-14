@@ -45,7 +45,7 @@ move_group::MoveGroupContext::MoveGroupContext(const moveit_cpp::MoveItCppPtr& m
                                                const std::string& default_planning_pipeline,
                                                bool allow_trajectory_execution, bool debug)
   : moveit_cpp_(moveit_cpp)
-  , planning_scene_monitor_(moveit_cpp->getPlanningSceneMonitorNonConst())
+  , planning_scene_monitor_(moveit_cpp->getPlanningSceneMonitor())
   , allow_trajectory_execution_(allow_trajectory_execution)
   , debug_(debug)
 {
@@ -72,7 +72,7 @@ move_group::MoveGroupContext::MoveGroupContext(const moveit_cpp::MoveItCppPtr& m
 
   if (allow_trajectory_execution_)
   {
-    trajectory_execution_manager_ = moveit_cpp_->getTrajectoryExecutionManagerNonConst();
+    trajectory_execution_manager_ = moveit_cpp_->getTrajectoryExecutionManager();
     plan_execution_ =
         std::make_shared<plan_execution::PlanExecution>(planning_scene_monitor_, trajectory_execution_manager_);
     plan_with_sensing_ = std::make_shared<plan_execution::PlanWithSensing>(trajectory_execution_manager_);

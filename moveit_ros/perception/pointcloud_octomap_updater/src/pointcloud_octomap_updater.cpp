@@ -140,6 +140,7 @@ void PointCloudOctomapUpdater::stopHelper()
   delete point_cloud_subscriber_;
 }
 
+
 void PointCloudOctomapUpdater::stop()
 {
   stopHelper();
@@ -150,8 +151,8 @@ void PointCloudOctomapUpdater::stop()
 ShapeHandle PointCloudOctomapUpdater::excludeShape(const shapes::ShapeConstPtr& shape)
 {
   ShapeHandle h = 0;
-  if (shape_mask_)
-    h = shape_mask_->addShape(shape, scale_, padding_);
+  if (shape_mask_){}
+    //h = shape_mask_->addShape(shape, scale_, padding_);
   else
     ROS_ERROR_NAMED(LOGNAME, "Shape filter not yet initialized!");
   return h;
@@ -159,7 +160,7 @@ ShapeHandle PointCloudOctomapUpdater::excludeShape(const shapes::ShapeConstPtr& 
 
 void PointCloudOctomapUpdater::forgetShape(ShapeHandle handle)
 {
-  if (shape_mask_)
+  if (shape_mask_){}
     shape_mask_->removeShape(handle);
 }
 

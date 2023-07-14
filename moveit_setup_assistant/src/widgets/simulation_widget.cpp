@@ -223,8 +223,8 @@ void SimulationWidget::openURDF()
   QString editor = qgetenv("EDITOR");
   if (editor.isEmpty())
     editor = "xdg-open";
-  QStringList args{ QString::fromStdString(config_data_->urdf_path_) };
-  if (!QProcess::startDetached(editor, args))
+  auto command = QString("%1 %2").arg(editor, config_data_->urdf_path_.c_str());
+  if (!QProcess::startDetached(command))
     QMessageBox::warning(this, "URDF Editor", tr("Failed to open editor: <pre>%1</pre>").arg(editor));
 }
 

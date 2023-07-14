@@ -273,16 +273,7 @@ bool SortFilterProxyModel::lessThan(const QModelIndex& src_left, const QModelInd
     if (value_left == value_right)
       continue;
 
-    bool smaller{};
-    switch (value_left.type())
-    {
-      case QVariant::Int:
-        smaller = value_left.toInt() < value_right.toInt();
-        break;
-      default:
-        smaller = value_left.toString() < value_right.toString();
-        break;
-    }
+    bool smaller = (value_left < value_right);
     if (sort_orders_[i] == Qt::DescendingOrder)
       smaller = !smaller;
     return smaller;

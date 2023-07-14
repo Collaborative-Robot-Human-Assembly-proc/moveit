@@ -43,7 +43,7 @@ namespace moveit
 namespace core
 {
 /// parse a double value from a scalar XmlRpc
-double parseDouble(const XmlRpc::XmlRpcValue& v);
+double parseDouble(XmlRpc::XmlRpcValue& v);
 
 /** check that v is an array of given size
  *
@@ -51,14 +51,13 @@ double parseDouble(const XmlRpc::XmlRpcValue& v);
  * @param name: if non-empty, print a warning message "name is not an array[size]"
  * @param description: if non-empty, serves as a descriptor for array items
  */
-bool isArray(const XmlRpc::XmlRpcValue& v, size_t size = 0, const std::string& name = "",
-             const std::string& description = "");
+bool isArray(XmlRpc::XmlRpcValue& v, size_t size = 0, const std::string& name = "", const std::string& description = "");
 
 /** check that v is a struct with given keys
  *
  * @param keys: list of required keys
  * @param name: if non-empty, print a warning message "name is not a struct with keys ..."
  */
-bool isStruct(const XmlRpc::XmlRpcValue& v, const std::vector<std::string>& keys = {}, const std::string& name = "");
+bool isStruct(XmlRpc::XmlRpcValue& v, const std::vector<std::string>& keys = {}, const std::string& name = "");
 }  // namespace core
 }  // namespace moveit

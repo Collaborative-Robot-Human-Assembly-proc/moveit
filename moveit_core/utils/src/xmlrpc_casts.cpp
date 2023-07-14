@@ -42,7 +42,7 @@ namespace moveit
 {
 namespace core
 {
-double parseDouble(const XmlRpc::XmlRpcValue& v)
+double parseDouble(XmlRpc::XmlRpcValue& v)
 {
   if (v.getType() == XmlRpc::XmlRpcValue::TypeDouble)
     return static_cast<double>(v);
@@ -52,7 +52,7 @@ double parseDouble(const XmlRpc::XmlRpcValue& v)
     return 0.0;
 }
 
-bool isArray(const XmlRpc::XmlRpcValue& v, size_t size, const std::string& name, const std::string& description)
+bool isArray(XmlRpc::XmlRpcValue& v, size_t size, const std::string& name, const std::string& description)
 {
   if (v.getType() != XmlRpc::XmlRpcValue::TypeArray || (size != 0 && static_cast<size_t>(v.size()) != size))
   {
@@ -64,7 +64,7 @@ bool isArray(const XmlRpc::XmlRpcValue& v, size_t size, const std::string& name,
   return true;
 }
 
-bool isStruct(const XmlRpc::XmlRpcValue& v, const std::vector<std::string>& keys, const std::string& name)
+bool isStruct(XmlRpc::XmlRpcValue& v, const std::vector<std::string>& keys, const std::string& name)
 {
   if (v.getType() != XmlRpc::XmlRpcValue::TypeStruct)
   {

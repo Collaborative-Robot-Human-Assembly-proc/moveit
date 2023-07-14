@@ -143,14 +143,13 @@ public:
   const std::map<std::string, planning_pipeline::PlanningPipelinePtr>& getPlanningPipelines() const;
 
   /** \brief Get the stored instance of the planning scene monitor */
-  planning_scene_monitor::PlanningSceneMonitorConstPtr getPlanningSceneMonitor() const;
+  const planning_scene_monitor::PlanningSceneMonitorPtr& getPlanningSceneMonitor() const;
   planning_scene_monitor::PlanningSceneMonitorPtr getPlanningSceneMonitorNonConst();
 
-  std::shared_ptr<const tf2_ros::Buffer> getTFBuffer() const;
-  std::shared_ptr<tf2_ros::Buffer> getTFBuffer();
+  const std::shared_ptr<tf2_ros::Buffer>& getTFBuffer() const;
 
   /** \brief Get the stored instance of the trajectory execution manager */
-  trajectory_execution_manager::TrajectoryExecutionManagerConstPtr getTrajectoryExecutionManager() const;
+  const trajectory_execution_manager::TrajectoryExecutionManagerPtr& getTrajectoryExecutionManager() const;
   trajectory_execution_manager::TrajectoryExecutionManagerPtr getTrajectoryExecutionManagerNonConst();
 
   /** \brief Execute a trajectory on the planning group specified by group_name using the trajectory execution manager.
@@ -168,6 +167,7 @@ protected:
 private:
   //  Core properties and instances
   ros::NodeHandle node_handle_;
+  moveit::core::RobotModelConstPtr robot_model_;
   planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor_;
 
   // Planning
@@ -176,6 +176,9 @@ private:
 
   // Execution
   trajectory_execution_manager::TrajectoryExecutionManagerPtr trajectory_execution_manager_;
+
+  /** \brief Reset all member variables */
+  void clearContents();
 
   /** \brief Initialize and setup the planning scene monitor */
   bool loadPlanningSceneMonitor(const PlanningSceneMonitorOptions& options);
